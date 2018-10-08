@@ -1,0 +1,12 @@
+{
+    "name": "marginaalileikkuri",
+    "authors": [
+        "Yleinen"
+    ],
+    "description": "A minimal D application.",
+    "dependencies": {
+        "derelict-fi": "~>3.0.0-beta.1"
+    },
+    "copyright": "(C) Ylivieskan Kivihiomo OY",
+    "license": "proprietary"
+}
