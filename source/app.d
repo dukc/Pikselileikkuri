@@ -3,8 +3,11 @@ import derelict.freeimage.freeimage;
 
 version (Windows) extern(Windows) int SetConsoleOutputCP(uint);
 
-//alias Pixel = ubyte;
+alias Pixel = uint;
 alias CoordinateInt = ReturnType!FreeImage_GetWidth;
+alias Bitmap = ReturnType!FreeImage_Load;
+
+enum supportedFileExtensions = [".gif", ".png"].sort;
 
 int main(string[] args)
 {   version (Windows) SetConsoleOutputCP(65001);
@@ -15,14 +18,20 @@ int main(string[] args)
         return 0;
     }
 
-    if (args[1].extension.toLower != ".gif")
-    {   writeln("Ohjelma on tarkoitettu vain gif-teidostoihin, tällä hetkellä");
+    auto fileExt = args[1].extension.toLower;
+
+    if (!(fileExt in supportedFileExtensions))
+    {   writeln("Tuetut tiedostoliitteet: ", supportedFileExtensions.joiner(", ").array);
         return 0;
     }
 
-    immutable(wchar)* cPath = (args[1].to!wstring ~ '\0').ptr;
+    immutable(wchar)* cPath = (args[$ - 1].to!wstring ~ '\0').toLower.ptr;
 
-    auto bitmap = FreeImage_LoadU(FIF_GIF, cPath, 0);
+    auto bitmap = fileExt.predSwitch
+    (   ".gif", FreeImage_LoadU(FIF_GIF, cPath, GIF_PLAYBACK),
+        ".png", FreeImage_LoadU(FIF_PNG, cPath, 0           ),
+    );
+
     if (bitmap is null)
     {   writeln("Tiedosto ei auennut. Tarkista polku ja, jos se on kunnossa, käyttöoikeudet.");
         return 0;
@@ -34,30 +43,59 @@ int main(string[] args)
         return 0;
     }
 
-    CoordinateInt pixelBits = bitmap.FreeImage_GetBPP;
+    auto newBitmap = bitmap.cutMarginals.visit!
+    (   (Bitmap bm) => bm,
+        (string msg)
+        {   msg.writeln;
+            return Bitmap(null);
+        }
+    );
+    if (newBitmap == null) return 0;
+    scope (exit) newBitmap.FreeImage_Unload;
+
+    if(fileExt.predSwitch
+    (   ".gif", ()
+        {   auto palettized = newBitmap.FreeImage_ColorQuantize(FIQ_WUQUANT);
+            assert(palettized != null);
+            scope (exit) palettized.FreeImage_Unload;
+            return FreeImage_SaveU(FIF_GIF, palettized, cPath, 0);
+        }(),
+        ".png", FreeImage_SaveU(FIF_PNG, newBitmap, cPath, 0)
+    )) writeln("Onnistui, marginaalit leikattu");
+    else writeln("Ohjelma avasi kuvan ja leikkasi marginaalit, muttei jostain syystä pystynyt tallentamaan tulosta.");
+
+    return 0;
+}
+
+Algebraic!(Bitmap, string) cutMarginals(Bitmap bitmap)
+{   CoordinateInt pixelBits = bitmap.FreeImage_GetBPP;
 
     auto dimensions = [bitmap.FreeImage_GetWidth, bitmap.FreeImage_GetHeight].staticArray;
     auto sideCoords = [dimensions[0], 0].staticArray!CoordinateInt;
     auto bottomUpCoords = [dimensions[1], 0].staticArray!CoordinateInt;
 
-    assert(pixelBits == 8);
-    auto transparentColours = bitmap
+    assert(bitmap.FreeImage_GetBPP / 8 == Pixel.sizeof);
+    /*auto transparentColours = bitmap
         .FreeImage_GetTransparencyTable[0 .. bitmap.FreeImage_GetTransparencyCount]
         .uniq
         .array
         .pipe!(a => a ~ *bitmap.FreeImage_GetScanLine(0))
-        .sort;
+        .sort;*/
 
-    //foreach(col; transparentColours) col.writeln;;
+    auto alphaMask = ~
+    (   bitmap.FreeImage_GetRedMask   |
+        bitmap.FreeImage_GetGreenMask |
+        bitmap.FreeImage_GetBlueMask
+    );
 
     iota(dimensions[1])
-    .map!(pixelY => bitmap.FreeImage_GetScanLine(pixelY)[0 .. to!CoordinateInt(dimensions[0] * pixelBits / ubyte.sizeof)])
+    .map!(pixelY => cast(Pixel*)(bitmap.FreeImage_GetScanLine(pixelY))[0 .. to!CoordinateInt(dimensions[0])])
     .map!(pixelLine =>
         dimensions[0]
         .iota
         .map!(index => pixelLine[index])
         .enumerate!CoordinateInt
-        .filterBidirectional!(px => !(px.value in transparentColours))
+        .filterBidirectional!(px => px.value & alphaMask)
         .map!(px => px.index))
     .enumerate!CoordinateInt
     .filterBidirectional!(tupArg!((height, opaqueWidths) => !opaqueWidths.empty))
@@ -77,23 +115,17 @@ int main(string[] args)
     auto newDimensions = [sideCoords[1] - sideCoords[0], bottomUpCoords[1] - bottomUpCoords[0]].staticArray;
 
     if (sideCoords[1] <= sideCoords[0])
-    {   writeln("Koko kuva on täysin läpinäkyvä. Ei jäisi mitään jäljelle, joten ei leikata.");
-        return 0;
+    {   return typeof(return)("Koko kuva on täysin läpinäkyvä. Ei jäisi mitään jäljelle, joten ei leikata.");
     }
     assert(bottomUpCoords[1] > bottomUpCoords[0]);
 
-    auto newBitmap = bitmap.FreeImage_Copy
+    return typeof(return)(bitmap.FreeImage_Copy
     (   sideCoords[0],
         dimensions[1] - bottomUpCoords[1],
         sideCoords[1],
         dimensions[1] - bottomUpCoords[0],
-    );
-    scope (exit) newBitmap.FreeImage_Unload;
+    ));
 
-    if (FreeImage_SaveU(FIF_GIF, newBitmap, cPath, 0)) writeln("Onnistui, marginaalit leikattu");
-    else writeln("Ohjelma avasi kuvan ja leikkasi marginaalit, muttei jostain syystä pystynyt tallentamaan tulosta.");
-
-    return 0;
 }
 
 ////////////////////////////////////////////
