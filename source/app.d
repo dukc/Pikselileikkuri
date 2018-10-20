@@ -58,6 +58,16 @@ int main(string[] args)
         {   auto palettized = newBitmap.FreeImage_ColorQuantize(FIQ_WUQUANT);
             assert(palettized != null);
             scope (exit) palettized.FreeImage_Unload;
+
+            //palettisointi ei jostain syystä säästä kuvan läpinäkyvyyttä, joten asetetaan se itse.
+            CoordinateInt[2] transparentIj = newBitmap.transparentCoord;
+            if (transparentIj[1] < bitmap.FreeImage_GetHeight)
+            {   ubyte transparentColour;
+                auto success = palettized.FreeImage_GetPixelIndex(transparentIj.tuplify.expand, &transparentColour);
+                assert(success);
+                palettized.FreeImage_SetTransparentIndex(transparentColour);
+            }
+
             return FreeImage_SaveU(FIF_GIF, palettized, cPath, 0);
         }(),
         ".png", FreeImage_SaveU(FIF_PNG, newBitmap, cPath, 0)
@@ -128,13 +138,39 @@ Algebraic!(Bitmap, string) cutMarginals(Bitmap bitmap)
 
 }
 
+CoordinateInt[2] transparentCoord(Bitmap bitmap)
+{   auto dimensions = [bitmap.FreeImage_GetWidth, bitmap.FreeImage_GetHeight].staticArray;
+
+    auto alphaMask = ~
+    (   bitmap.FreeImage_GetRedMask   |
+        bitmap.FreeImage_GetGreenMask |
+        bitmap.FreeImage_GetBlueMask
+    );
+
+    return iota(dimensions[1])
+    .map!(pixelY => cast(Pixel*)(bitmap.FreeImage_GetScanLine(pixelY))[0 .. to!CoordinateInt(dimensions[0])])
+    .map!(pixelLine =>
+        dimensions[0]
+        .iota
+        .map!(index => pixelLine[index])
+        .enumerate!CoordinateInt
+        .filter!(px => !(px.value & alphaMask))
+        .map!(px => px.index))
+    .enumerate!CoordinateInt
+    .filter!(tupArg!((height, transparentWidths) => !transparentWidths.empty))
+    .map!(tupArg!((height, transparentWidths) => [transparentWidths.front, height].staticArray))
+    .chain([0, dimensions[1]].staticArray.only)
+    .front
+    ;
+}
+
 ////////////////////////////////////////////
 // yleisfunktioita
 ////////////////////////////////////////////
 
 auto ref tuplify(E, size_t n)(E[n] array)
 {   return array
-    .Tuple!(Repeat!(n, double));
+    .Tuple!(Repeat!(n, E));
 }
 alias tupArg(alias func) = x => func(x.expand);
 
