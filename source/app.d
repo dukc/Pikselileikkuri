@@ -128,7 +128,10 @@ int main(string[] args)
             return FreeImage_SaveU(FIF_GIF, palettized, cPath, 0);
         }(),
         ".png", FreeImage_SaveU(FIF_PNG, finalBitmap, cPath, 0)
-    )) writeln("Ohjelma ajettu onnistuneesti.");
+    ))
+    {   //älä muuta tätä viestiä noin vain: Kaiverrusgalleria käyttää sitä
+        writeln("Ohjelma ajettu onnistuneesti.");
+    }
     else writeln("Ohjelma avasi kuvan ja teki operaatiot, muttei jostain syystä pystynyt tallentamaan tulosta.");
 
     return 0;
