@@ -112,18 +112,59 @@ int main(string[] args)
 
     if(fileExt.predSwitch
     (   ".gif", ()
-        {   auto palettized = finalBitmap.FreeImage_ColorQuantize(FIQ_WUQUANT);
-            assert(palettized != null);
-            scope (exit) palettized.FreeImage_Unload;
+        {   auto alphaMask = ~
+            (   finalBitmap.FreeImage_GetRedMask   |
+                finalBitmap.FreeImage_GetGreenMask |
+                finalBitmap.FreeImage_GetBlueMask
+            );
 
-            //palettisointi ei jostain syystä säästä kuvan läpinäkyvyyttä, joten asetetaan se itse.
-            CoordinateInt[2] transparentIj = finalBitmap.transparentCoord;
-            if (transparentIj[1] < finalBitmap.FreeImage_GetHeight)
-            {   ubyte transparentColour;
-                auto success = palettized.FreeImage_GetPixelIndex(transparentIj.tuplify.expand, &transparentColour);
-                assert(success);
-                palettized.FreeImage_SetTransparentIndex(transparentColour);
+            //Etsitään väri jota kuvassa ei vielä ole
+            Pixel backgroundColour;
+            if (true)
+            {   // Höh, mokoma operaatio vain jotta löytyisi sopiva taustaväri. Ei olisi
+                // pahitteeksi jos tämän saisi optimoitua pois.
+                Bitmap testMap = finalBitmap.FreeImage_ColorQuantize(FIQ_WUQUANT);
+                Mt19937 rng;
+                scope (exit) testMap.FreeImage_Unload;
+                assert(testMap != null);
+
+                electMarker:
+                backgroundColour = rng.front | alphaMask;
+                rng.popFront();
+
+                //Jos väri on jo kuvassa, uudestaan.
+                if
+                (   (cast(Pixel*)testMap.FreeImage_GetPalette)
+                    [0 .. testMap.FreeImage_GetColorsUsed]
+                    .canFind(backgroundColour)
+                ) goto electMarker;
             }
+
+            // FreeImage_ColorQuantize() ei tunnu huomioivan läpinäkyvyyttä, joten muutetaan läpinäkymättömät kohdat äsken arvotulle
+            // taustavärille sen ajaksi. Melkoisen tehotonta että niin joutuu tekemään kyllä, mutta en keksi parempaa.
+            foreach(lineY; iota(finalBitmap.FreeImage_GetHeight))
+                foreach(ref px; (cast(Pixel*) finalBitmap.FreeImage_GetScanLine(lineY))[0 .. finalBitmap.FreeImage_GetWidth])
+            {   if (!(px & alphaMask)) px = backgroundColour;
+            }
+
+            Bitmap palettized = finalBitmap.FreeImage_ColorQuantize(FIQ_WUQUANT);
+            scope (exit) palettized.FreeImage_Unload;
+            assert(palettized != null);
+
+            //taustaväri läpinäkyväksi
+            palettized.FreeImage_SetTransparentIndex
+            (   palettized.FreeImage_GetPalette[0 .. palettized.FreeImage_GetColorsUsed]
+                .map!
+                (   quad
+                    => quad.rgbRed * (finalBitmap.FreeImage_GetRedMask / 0xFF)
+                    | quad.rgbGreen * (finalBitmap.FreeImage_GetGreenMask / 0xFF)
+                    | quad.rgbBlue * (finalBitmap.FreeImage_GetBlueMask / 0xFF)
+                    | alphaMask
+                )
+                .until(backgroundColour).walkLength
+            );
+
+            writefln("bc:%x, i:%s", backgroundColour, palettized.FreeImage_GetTransparentIndex);
 
             return FreeImage_SaveU(FIF_GIF, palettized, cPath, 0);
         }(),
