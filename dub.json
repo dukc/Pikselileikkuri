@@ -5,8 +5,9 @@
     ],
     "description": "A minimal D application.",
     "dependencies": {
-        "derelict-fi": "~>3.0.0-beta.1"
+        "bindbc-freeimage": "~>0.2.0"
     },
+    "versions": [ "FI_317" ],
     "copyright": "(C) Ylivieskan Kivihiomo OY",
     "license": "proprietary"
 }

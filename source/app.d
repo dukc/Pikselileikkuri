@@ -1,5 +1,5 @@
 import std.experimental.all;
-import derelict.freeimage.freeimage;
+import bindbc.freeimage;
 
 version (Windows) extern(Windows) int SetConsoleOutputCP(uint);
 
@@ -9,9 +9,19 @@ alias Bitmap = ReturnType!FreeImage_Load;
 
 enum supportedFileExtensions = [".gif", ".png"].sort;
 
+version (Windows) alias loadImage = FreeImage_LoadU;
+else alias loadImage = FreeImage_Load;
+
+version (Windows) alias saveImage = FreeImage_SaveU;
+else alias saveImage = FreeImage_Save;
+
 int main(string[] args)
 {   version (Windows) SetConsoleOutputCP(65001);
-    DerelictFI.load();
+    auto loadResult = loadFreeImage();
+    if (loadResult != fiSupport)
+    {	writeln("FreeImagessa vikaa, latauksen tulos ", loadResult);
+		if (loadResult == FISupport.noLibrary) return 1;
+	}
 
     ushort rgbColour = ushort.max;
     bool marginalsDisliked = false;
@@ -76,11 +86,12 @@ int main(string[] args)
         return 0;
     }
 
-    immutable(wchar)* cPath = (args[$ - 1].to!wstring ~ '\0').toLower.ptr;
+    version (Windows) immutable(wchar)* cPath = (args[$ - 1].to!wstring ~ '\0').ptr;
+    else immutable(char)* cPath = (args[$ - 1] ~ '\0').ptr;
 
     auto bitmap0 = fileExt.predSwitch
-    (   ".gif", FreeImage_LoadU(FIF_GIF, cPath, GIF_PLAYBACK),
-        ".png", FreeImage_LoadU(FIF_PNG, cPath, 0           ),
+    (   ".gif", loadImage(FIF_GIF, cPath, GIF_PLAYBACK),
+        ".png", loadImage(FIF_PNG, cPath, 0           ),
     );
 
     if (bitmap0 is null)
@@ -161,14 +172,14 @@ int main(string[] args)
                     | quad.rgbBlue * (finalBitmap.FreeImage_GetBlueMask / 0xFF)
                     | alphaMask
                 )
-                .until(backgroundColour).walkLength
+                .until(backgroundColour).walkLength.to!int
             );
 
             writefln("bc:%x, i:%s", backgroundColour, palettized.FreeImage_GetTransparentIndex);
 
-            return FreeImage_SaveU(FIF_GIF, palettized, cPath, 0);
+            return saveImage(FIF_GIF, palettized, cPath, 0);
         }(),
-        ".png", FreeImage_SaveU(FIF_PNG, finalBitmap, cPath, 0)
+        ".png", saveImage(FIF_PNG, finalBitmap, cPath, 0)
     ))
     {   //älä muuta tätä viestiä noin vain: Kaiverrusgalleria käyttää sitä
         writeln("Ohjelma ajettu onnistuneesti.");
