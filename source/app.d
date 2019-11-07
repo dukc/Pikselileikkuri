@@ -1,5 +1,6 @@
-import std.experimental.all;
+import std;
 import bindbc.freeimage;
+import std.getopt : optConfig = config;
 
 version (Windows) extern(Windows) int SetConsoleOutputCP(uint);
 
@@ -7,6 +8,7 @@ alias Pixel = uint;
 alias CoordinateInt = ReturnType!FreeImage_GetWidth;
 alias Bitmap = ReturnType!FreeImage_Load;
 
+enum Ortho{right, down, left, up}
 enum supportedFileExtensions = [".gif", ".png"].sort;
 
 version (Windows) alias loadImage = FreeImage_LoadU;
@@ -24,15 +26,16 @@ int main(string[] args)
 	}
 
     ushort rgbColour = ushort.max;
-    bool marginalsDisliked = false;
+    Nullable!(uint[EnumMembers!Ortho.length]) wantedMarginals;
 
     try
     {   string colourString = "";
+        string marginalString = "";
         auto info = getopt
         (   args,
-            std.getopt.config.stopOnFirstNonOption,
+            optConfig.stopOnFirstNonOption,
             "colour|c", "Väri johon muuttaa kuva", &colourString,
-            "marginals|m", "Leikataan marginaalit pois", &marginalsDisliked,
+            "marginals|m", "Leikataan marginaalit pois, syötä joko vaaka - ja pystymarginaali tai oikea-ala-vasen-ylämarginaali", &marginalString,
         );
 
         if (info.helpWanted)
@@ -66,7 +69,16 @@ int main(string[] args)
             );
         }
 
-        if (colourString.empty && !marginalsDisliked)
+        if (!marginalString.empty)
+        {   auto parsedMarginalString = marginalString.parseMarginalSize;
+            if (not(parsedMarginalString.hasValue))
+            {   writeln("marginaaliarvo syötetty väärin. Syötä 0, 2 tai 4 kokonaislukua väleillä erotettuna");
+                return 0;
+            }
+            wantedMarginals = parsedMarginalString;
+        }
+
+        if (colourString.empty && wantedMarginals.isNull)
         {   writeln("Kutsussa ei ole järkeä, koska ohjelmaa ei komennettu varsinaisesti tekemään mitään.");
             writeln("Anna ohjelmalle joko -c tai -m - argumentti (tai molemmat).");
             return 0;
@@ -105,7 +117,7 @@ int main(string[] args)
         return 0;
     }
 
-    auto finalBitmap = marginalsDisliked? bitmap0.cutMarginals.visit!
+    auto finalBitmap = wantedMarginals.hasValue? bitmap0.cutMarginals(wantedMarginals.get).visit!
     (   (Bitmap bm) => bm,
         (string msg)
         {   msg.writeln;
@@ -189,8 +201,10 @@ int main(string[] args)
     return 0;
 }
 
-Algebraic!(Bitmap, string) cutMarginals(Bitmap bitmap)
-{   writeln("Karsitaan marginaaleja");
+Algebraic!(Bitmap, string) cutMarginals(Bitmap bitmap, CoordinateInt[EnumMembers!Ortho.length] marginals = [0, 0, 0, 0])
+{   import mir.ndslice : windows;
+
+    writeln("Karsitaan marginaaleja");
     CoordinateInt pixelBits = bitmap.FreeImage_GetBPP;
 
     auto dimensions = [bitmap.FreeImage_GetWidth, bitmap.FreeImage_GetHeight].staticArray;
@@ -198,6 +212,7 @@ Algebraic!(Bitmap, string) cutMarginals(Bitmap bitmap)
     auto bottomUpCoords = [dimensions[1], 0].staticArray!CoordinateInt;
 
     assert(bitmap.FreeImage_GetBPP / 8 == Pixel.sizeof);
+    assert(!(bitmap.FreeImage_GetBPP % 8));
 
     auto alphaMask = ~
     (   bitmap.FreeImage_GetRedMask   |
@@ -229,20 +244,64 @@ Algebraic!(Bitmap, string) cutMarginals(Bitmap bitmap)
         }
     });
 
-    auto newDimensions = [sideCoords[1] - sideCoords[0], bottomUpCoords[1] - bottomUpCoords[0]].staticArray;
+    auto newDimensions =
+    [   sideCoords[1] - sideCoords[0] + marginals[Ortho.left] + marginals[Ortho.right],
+        bottomUpCoords[1] - bottomUpCoords[0] + marginals[Ortho.down] + marginals[Ortho.up]
+    ].staticArray;
 
     if (sideCoords[1] <= sideCoords[0])
     {   return typeof(return)("Koko kuva on täysin läpinäkyvä. Marginaalileikkaus ei jättäisi mitään jäljelle, joten ohjelma ei tehnyt mitään.");
     }
     assert(bottomUpCoords[1] > bottomUpCoords[0]);
 
-    return typeof(return)(bitmap.FreeImage_Copy
-    (   sideCoords[0],
-        dimensions[1] - bottomUpCoords[1],
-        sideCoords[1],
-        dimensions[1] - bottomUpCoords[0],
-    ));
+    auto result = FreeImage_Allocate(newDimensions[0], newDimensions[1], Pixel.sizeof * 8);
 
+    assert (result != null);
+
+    result.getBits
+    .windows(bottomUpCoords[1] - bottomUpCoords[0], sideCoords[1] - sideCoords[0])
+    [marginals[Ortho.down], marginals[Ortho.left]][]
+    = bitmap.getBits
+    .windows(bottomUpCoords[1] - bottomUpCoords[0], sideCoords[1] - sideCoords[0])
+    [bottomUpCoords[0], sideCoords[0]][];
+
+    return typeof(return)(result);
+}
+
+Nullable!(uint[Ortho.max + 1]) parseMarginalSize(CharRange)(CharRange input)
+    if (is(typeof(input.byCodeUnit.front) : dchar))
+{   try
+    {   auto numbers = input.byCodeUnit
+        .splitter!(c => !c.isNumber)
+        .filter!(range => !range.empty)
+        .map!(range => range.array.to!uint)
+        .array;
+
+        switch (numbers.length)
+        {   case 0: return [0u, 0u, 0u, 0u].staticArray.nullable;
+            case 2: return [numbers[0], numbers[1], numbers[0], numbers[1]].staticArray.nullable;
+            case 4: return numbers.staticArray!4.nullable;
+            default: return typeof(return).init;
+        }
+    }
+    catch (ConvOverflowException e){}
+    catch (ConvException e){}
+
+    return typeof(return).init;
+}
+
+auto getBits(Flag!"cutPitch" cutPitch = No.cutPitch)(Bitmap bitmap)
+{   import mir.ndslice;
+
+    assert (bitmap !is null);
+    auto height = bitmap.FreeImage_GetHeight;
+    auto pitch = bitmap.FreeImage_GetPitch;
+
+    auto result = (cast(Pixel[]) bitmap.FreeImage_GetBits[0 .. height * pitch])
+    .sliced(height, pitch / Pixel.sizeof);
+
+    static if (cutPitch) return result.windows(height, bitmap.FreeImage_GetWidth)[0, 0];
+    else return result;
 }
 
 CoordinateInt[2] transparentCoord(Bitmap bitmap)
@@ -291,15 +350,13 @@ void colourize(Bitmap bitmap, Pixel how)
 // yleisfunktioita
 ////////////////////////////////////////////
 
+alias not = x => !x;
+bool hasValue(NullableType)(NullableType container)
+    if(isInstanceOf!(Nullable, NullableType))
+{   return !container.isNull;
+}
 auto ref tuplify(E, size_t n)(E[n] array)
 {   return array
     .Tuple!(Repeat!(n, E));
 }
 alias tupArg(alias func) = x => func(x.expand);
-
-auto staticArray(E, size_t n)(E[n] elements){return elements;}
-auto staticArray(size_t n, R)(R elements)
-{   typeof(elements.front)[n] result;
-    elements.take(n).copy(result[]);
-    return result;
-}

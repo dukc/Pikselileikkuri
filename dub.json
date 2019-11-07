@@ -1,13 +1,16 @@
 {
-    "name": "marginaalileikkuri",
-    "authors": [
-        "Yleinen"
-    ],
-    "description": "A minimal D application.",
-    "dependencies": {
-        "bindbc-freeimage": "~>0.2.0"
-    },
-    "versions": [ "FI_317" ],
-    "copyright": "(C) Ylivieskan Kivihiomo OY",
-    "license": "proprietary"
+	"authors": [
+		"Yleinen"
+	],
+	"copyright": "(C) Ylivieskan Kivihiomo OY",
+	"dependencies": {
+		"bindbc-freeimage": "~>0.2.0",
+		"mir-algorithm": "~>3.6.8"
+	},
+	"description": "A minimal D application.",
+	"license": "proprietary",
+	"name": "marginaalileikkuri",
+	"versions": [
+		"FI_317"
+	]
 }
