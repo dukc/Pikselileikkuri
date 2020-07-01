@@ -27,15 +27,24 @@ int main(string[] args)
 
     ushort rgbColour = ushort.max;
     Nullable!(uint[EnumMembers!Ortho.length]) wantedMarginals;
-
+	double brightness, contrast;
+	double[3] rgbFactors;
+	
     try
     {   string colourString = "";
         string marginalString = "";
+        
+        
         auto info = getopt
         (   args,
             optConfig.stopOnFirstNonOption,
             "colour|c", "Väri johon muuttaa kuva", &colourString,
-            "marginals|m", "Leikataan marginaalit pois, syötä joko vaaka - ja pystymarginaali tai oikea-ala-vasen-ylämarginaali", &marginalString,
+            "marginals|m", "Leikataan marginaalit haluttuun mittaan, syötä joko vaaka - ja pystymarginaali tai oikea-ala-vasen-ylämarginaali", &marginalString,
+            "brightness", "Kirkkaudensäätö -100 - 100", &brightness,
+            "contrast", "Kontrastinsäätö -100 - 100", &contrast,
+            "red", "Punasäätö 0 - ꝏ, 100 normaali", &rgbFactors[0],
+            "green", "Vihersäätö 0 - ꝏ, 100 normaali", &rgbFactors[1],
+            "blue", "Sinisäätö 0 - ꝏ, 100 normaali", &rgbFactors[2],
         );
 
         if (info.helpWanted)
@@ -78,9 +87,10 @@ int main(string[] args)
             wantedMarginals = parsedMarginalString;
         }
 
-        if (colourString.empty && wantedMarginals.isNull)
+        if (colourString.empty && wantedMarginals.isNull && brightness.isNaN
+			&& contrast.isNaN && rgbFactors[].all!(fac=>fac.isNaN))
         {   writeln("Kutsussa ei ole järkeä, koska ohjelmaa ei komennettu varsinaisesti tekemään mitään.");
-            writeln("Anna ohjelmalle joko -c tai -m - argumentti (tai molemmat).");
+            writeln("Anna ohjelmalle jokin argumentti ennen tiedostonnimeä");
             return 0;
         }
     }
@@ -132,6 +142,16 @@ int main(string[] args)
         | finalBitmap.FreeImage_GetGreenMask / 0xF * (rgbColour / 0x010 & 0xF)
         | finalBitmap.FreeImage_GetBlueMask  / 0xF * (rgbColour / 0x001 & 0xF)
     );
+    
+    if(!brightness.isNaN)
+    {	const succ = FreeImage_AdjustBrightness(finalBitmap, brightness);
+		if (!succ) writeln("jotain meni pieleen kirkkauden säädössä");
+	}
+    if(!contrast.isNaN)
+    {	const succ = FreeImage_AdjustContrast(finalBitmap, contrast);
+		if (!succ) writeln("jotain meni pieleen kontrastin säädössä");
+	}
+	foreach(errMsg; finalBitmap.adjustColours(rgbFactors)) errMsg.writeln;
 
     if(fileExt.predSwitch
     (   ".gif", ()
@@ -266,6 +286,24 @@ Algebraic!(Bitmap, string) cutMarginals(Bitmap bitmap, CoordinateInt[EnumMembers
     [bottomUpCoords[0], sideCoords[0]][];
 
     return typeof(return)(result);
+}
+
+string[] adjustColours(Bitmap bmap, double[3] factors)
+{	typeof(return) result;
+	foreach(facI,factor; factors) if(!factor.isNaN)
+	{	auto table = new ubyte[](256);
+		foreach(i; 0..256)
+		{	const light= i*factor, dark= (255-i)*100.0;
+			table[i] = cast(ubyte)(256*light / (light+dark));
+		}
+		const chann= facI.predSwitch(0,FICC_RED, 1,FICC_GREEN, 2,FICC_BLUE);
+		if(!bmap.FreeImage_AdjustCurve(table.ptr, chann))
+		{	const chanName= facI.predSwitch(0,"Puna", 1,"Viher", 2,"Sini");
+			result ~= chanName ~ "kanavan säätämisessä tuli jokin ongelma";
+		}
+	}
+	
+	return result;
 }
 
 Nullable!(uint[Ortho.max + 1]) parseMarginalSize(CharRange)(CharRange input)
