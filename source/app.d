@@ -1,15 +1,15 @@
-import std;
+static import std;
 import bindbc.freeimage;
 import std.getopt : optConfig = config;
 
 version (Windows) extern(Windows) int SetConsoleOutputCP(uint);
 
 alias Pixel = uint;
-alias CoordinateInt = ReturnType!FreeImage_GetWidth;
-alias Bitmap = ReturnType!FreeImage_Load;
+alias CoordinateInt = std.ReturnType!FreeImage_GetWidth;
+alias Bitmap = std.ReturnType!FreeImage_Load;
 
 enum Ortho{right, down, left, up}
-enum supportedFileExtensions = [".gif", ".png"].sort;
+enum supportedFileExtensions = std.sort([".gif", ".png"]);
 
 version (Windows) alias loadImage = FreeImage_LoadU;
 else alias loadImage = FreeImage_Load;
@@ -18,7 +18,11 @@ version (Windows) alias saveImage = FreeImage_SaveU;
 else alias saveImage = FreeImage_Save;
 
 int main(string[] args)
-{   version (Windows) SetConsoleOutputCP(65001);
+{   import std;
+    import bindbc.freeimage;
+    import std.getopt : optConfig = config;
+    
+    version (Windows) SetConsoleOutputCP(65001);
     auto loadResult = loadFreeImage();
     if (loadResult != fiSupport)
     {	writeln("FreeImagessa vikaa, latauksen tulos ", loadResult);
@@ -137,11 +141,16 @@ int main(string[] args)
     if (finalBitmap == null) return 0;
     scope (exit) finalBitmap.FreeImage_Unload;
 
-    if(rgbColour < 0x1000) finalBitmap.colourize
-    (     finalBitmap.FreeImage_GetRedMask   / 0xF * (rgbColour / 0x100 & 0xF)
-        | finalBitmap.FreeImage_GetGreenMask / 0xF * (rgbColour / 0x010 & 0xF)
-        | finalBitmap.FreeImage_GetBlueMask  / 0xF * (rgbColour / 0x001 & 0xF)
-    );
+    if(rgbColour < 0x1000)
+    {   version (Profile) auto startTime = MonoTime.currTime;
+        finalBitmap.colourize
+        (     finalBitmap.FreeImage_GetRedMask   / 0xF * (rgbColour / 0x100 & 0xF)
+            | finalBitmap.FreeImage_GetGreenMask / 0xF * (rgbColour / 0x010 & 0xF)
+            | finalBitmap.FreeImage_GetBlueMask  / 0xF * (rgbColour / 0x001 & 0xF)
+        );
+        version (Profile) auto dur = MonoTime.currTime - startTime;
+        version (Profile) writeln("väritys kesti ", dur.total!"usecs", " us");
+    }
     
     if(!brightness.isNaN)
     {	const succ = FreeImage_AdjustBrightness(finalBitmap, brightness);
@@ -153,6 +162,7 @@ int main(string[] args)
 	}
 	foreach(errMsg; finalBitmap.adjustColours(rgbFactors)) errMsg.writeln;
 
+    version (Profile) auto startTime = MonoTime.currTime;
     if(fileExt.predSwitch
     (   ".gif", ()
         {   auto alphaMask = ~
@@ -206,9 +216,7 @@ int main(string[] args)
                 )
                 .until(backgroundColour).walkLength.to!int
             );
-
-            writefln("bc:%x, i:%s", backgroundColour, palettized.FreeImage_GetTransparentIndex);
-
+            
             return saveImage(FIF_GIF, palettized, cPath, 0);
         }(),
         ".png", saveImage(FIF_PNG, finalBitmap, cPath, 0)
@@ -218,11 +226,19 @@ int main(string[] args)
     }
     else writeln("Ohjelma avasi kuvan ja teki operaatiot, muttei jostain syystä pystynyt tallentamaan tulosta.");
 
+    version (Profile)
+    {   auto dur = MonoTime.currTime - startTime;
+        writeln("tulostus kesti ", dur.total!"usecs", " us");
+    }
+
     return 0;
 }
 
-Algebraic!(Bitmap, string) cutMarginals(Bitmap bitmap, CoordinateInt[EnumMembers!Ortho.length] marginals = [0, 0, 0, 0])
-{   import mir.ndslice : windows;
+std.Algebraic!(Bitmap, string) cutMarginals(Bitmap bitmap, CoordinateInt[std.EnumMembers!Ortho.length] marginals = [0, 0, 0, 0])
+{   import std;
+    import mir.ndslice : windows;
+    
+    version (Profile) auto startTime = MonoTime.currTime;
 
     writeln("Karsitaan marginaaleja");
     CoordinateInt pixelBits = bitmap.FreeImage_GetBPP;
@@ -284,12 +300,19 @@ Algebraic!(Bitmap, string) cutMarginals(Bitmap bitmap, CoordinateInt[EnumMembers
     = bitmap.getBits
     .windows(bottomUpCoords[1] - bottomUpCoords[0], sideCoords[1] - sideCoords[0])
     [bottomUpCoords[0], sideCoords[0]][];
+    
+    version (Profile)
+    {   auto dur = MonoTime.currTime - startTime;
+        writeln("Marginaalileikkuu kesti ", dur.total!"usecs", " us");
+    }
 
     return typeof(return)(result);
 }
 
 string[] adjustColours(Bitmap bmap, double[3] factors)
-{	typeof(return) result;
+{	import std;
+    
+    typeof(return) result;
 	foreach(facI,factor; factors) if(!factor.isNaN)
 	{	auto table = new ubyte[](256);
 		foreach(i; 0..256)
@@ -306,9 +329,10 @@ string[] adjustColours(Bitmap bmap, double[3] factors)
 	return result;
 }
 
-Nullable!(uint[Ortho.max + 1]) parseMarginalSize(CharRange)(CharRange input)
-    if (is(typeof(input.byCodeUnit.front) : dchar))
-{   try
+std.Nullable!(uint[Ortho.max + 1]) parseMarginalSize(CharRange)(CharRange input)
+    if (is(typeof(std.byCodeUnit(input).front) : dchar))
+{   import std;
+    try
     {   auto numbers = input.byCodeUnit
         .splitter!(c => !c.isNumber)
         .filter!(range => !range.empty)
@@ -328,8 +352,8 @@ Nullable!(uint[Ortho.max + 1]) parseMarginalSize(CharRange)(CharRange input)
     return typeof(return).init;
 }
 
-auto getBits(Flag!"cutPitch" cutPitch = No.cutPitch)(Bitmap bitmap)
-{   import mir.ndslice;
+auto getBits(std.Flag!"cutPitch" cutPitch = std.No.cutPitch)(Bitmap bitmap)
+{   import std, mir.ndslice;
 
     assert (bitmap !is null);
     auto height = bitmap.FreeImage_GetHeight;
@@ -343,7 +367,9 @@ auto getBits(Flag!"cutPitch" cutPitch = No.cutPitch)(Bitmap bitmap)
 }
 
 CoordinateInt[2] transparentCoord(Bitmap bitmap)
-{   auto dimensions = [bitmap.FreeImage_GetWidth, bitmap.FreeImage_GetHeight].staticArray;
+{   import std;
+    
+    auto dimensions = [bitmap.FreeImage_GetWidth, bitmap.FreeImage_GetHeight].staticArray;
 
     auto alphaMask = ~
     (   bitmap.FreeImage_GetRedMask   |
@@ -369,7 +395,9 @@ CoordinateInt[2] transparentCoord(Bitmap bitmap)
 }
 
 void colourize(Bitmap bitmap, Pixel how)
-{   writeln("vaihdetaan väriä");
+{   import std;
+    
+    writeln("vaihdetaan väriä");
     auto dimensions = [bitmap.FreeImage_GetWidth, bitmap.FreeImage_GetHeight].staticArray;
 
     auto alphaMask = ~
@@ -390,11 +418,10 @@ void colourize(Bitmap bitmap, Pixel how)
 
 alias not = x => !x;
 bool hasValue(NullableType)(NullableType container)
-    if(isInstanceOf!(Nullable, NullableType))
+    if(std.isInstanceOf!(std.Nullable, NullableType))
 {   return !container.isNull;
 }
 auto ref tuplify(E, size_t n)(E[n] array)
-{   return array
-    .Tuple!(Repeat!(n, E));
+{   return std.Tuple!(std.Repeat!(n, E)(array));
 }
 alias tupArg(alias func) = x => func(x.expand);
