@@ -9,7 +9,6 @@
 		"mir-algorithm": "~>3.6.8"
 	},
 	"description": "A minimal D application.",
-	"license": "proprietary",
 	"name": "marginaalileikkuri",
 	"versions": [
 		"FI_317"
