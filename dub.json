@@ -1,7 +1,8 @@
 {
 	"authors": [
-		"Yleinen"
+		"Ate Eskola"
 	],
+	"license": "MIT",
 	"copyright": "(C) Ylivieskan Kivihiomo OY",
 	"dependencies": {
 		"bindbc-freeimage": "~>0.2.0",
